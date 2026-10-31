@@ -26,6 +26,10 @@ import SwiftUI
     @Published var overrides:[String:String]=[:] {didSet{defaults.set(overrides,forKey:"guideOverrides");indexGuides()}}
     @Published var player:PlayerSession?
     @Published var playbackRequest=UUID()
+    @Published var daddyEnabled=false {didSet{defaults.set(daddyEnabled,forKey:"daddyEnabled")}}
+    @Published var daddyEvents:[DaddyEvent]=[]
+    @Published var daddyError=""
+    @Published var daddyBusy=false
     private let defaults=UserDefaults.standard
     private var privateReadable=true
     private var guideMatches:[String:String]=[:]
@@ -41,6 +45,7 @@ import SwiftUI
         sharedGuides=defaults.string(forKey:"sharedGuides") ?? ""
         region=defaults.string(forKey:"region") ?? "US"
         providersEnabled=defaults.bool(forKey:"providersEnabled")
+        daddyEnabled=defaults.bool(forKey:"daddyEnabled")
         providerIDs=Set(defaults.stringArray(forKey:"providerIDs") ?? ["nfx","hbm","dnp"])
         favouriteIDs=Set(defaults.stringArray(forKey:"favourites") ?? [])
         overrides=defaults.dictionary(forKey:"guideOverrides") as? [String:String] ?? [:]
@@ -56,6 +61,7 @@ import SwiftUI
     var liveChannels:[TVChannel]{channels.filter{sourceFilter=="All sources" || $0.sourceID==sourceFilter}}
     func visible(group:String="All groups",favourites:Bool=false)->[TVChannel]{sortedChannels(liveChannels.filter{!favourites || favouriteIDs.contains($0.id)},order:order,group:group)}
     var groups:[String]{["All groups"]+Set(liveChannels.map(\.group)).sorted()}
+    private var guideSources:[TVSource]{sources+(daddyEnabled ? [TVSource(id:"daddylive",name:"DaddyLive",address:DaddyLive.home)]:[])}
     func refreshSources(force:Bool=false)async{
         guard !busy else{return};busy=true;defer{busy=false}
         var result:[TVChannel]=[];var failed:[String]=[]
@@ -63,8 +69,9 @@ import SwiftUI
             do{result += try await load(source,force:force).channels}
             catch{result += channels.filter{$0.sourceID==source.id};failed.append(source.name+": "+error.localizedDescription)}
         }
-        channels=result;indexGuides();if !failed.isEmpty{message=failed.joined(separator:"\n")}
+        channels=result+(daddyEnabled ? channels.filter{$0.sourceID=="daddylive"}:[]);indexGuides();if !failed.isEmpty{message=failed.joined(separator:"\n")}
         await refreshGuides(force:force)
+        if daddyEnabled{await refreshDaddy(force:force)}
     }
     private func load(_ source:TVSource,force:Bool=false)async throws->(channels:[TVChannel],guides:[String]){
         if source.kind == .xtream{return(try await Xtream.fetch(source,kind:"live",force:force),[])}
@@ -107,14 +114,14 @@ import SwiftUI
             catch{failed += 1}
         }
         var next:[String:TVGuide]=[:]
-        for source in sources{var merged=TVGuide();for url in Set(shared+source.guides){if let guide=fetched[url]{merged.merge(guide)}};if merged.count>0 || urls.isEmpty{next[source.id]=merged}else{next[source.id]=guides[source.id]}}
+        for source in guideSources{var merged=TVGuide();for url in Set(shared+source.guides){if let guide=fetched[url]{merged.merge(guide)}};if merged.count>0 || urls.isEmpty{next[source.id]=merged}else{next[source.id]=guides[source.id]}}
         guides=next;indexGuides();lastGuideRefresh=Date()
         if failed>0{message="\(failed) guide feed(s) could not be loaded. Cached data is used where available. You can change feeds in Settings."}
     }
     func refreshWhenNeeded()async{if Date().timeIntervalSince(lastGuideRefresh)>6*3600{await refreshGuides()}}
     private func indexGuides(){
         var matches:[String:String]=[:]
-        for source in sources{
+        for source in guideSources{
             guard let guide=guides[source.id] else{continue};var byName:[String:Set<String>]=[:]
             for(id,names)in guide.names where guide.schedules[id] != nil{for name in names{byName[normalized(name),default:[]].insert(id)}}
             for channel in channels where channel.sourceID==source.id{
@@ -156,11 +163,17 @@ import SwiftUI
     }
     func play(_ channel:TVChannel,within rows:[TVChannel]?=nil,resume:Bool=true){
         if !channel.restriction.isEmpty{message=channel.restriction;return}
-        if !channel.headers.isEmpty{message="This entry requires custom HTTP headers. Header-dependent playback is not supported in this tvOS release.";return}
-        guard webURL(channel.url) != nil else{message=TVFailure.invalidURL.localizedDescription;return}
+        guard webURL(channel.url) != nil || channel.transport?.hasPrefix("torrent:")==true && channel.url.lowercased().hasPrefix("magnet:?") else{message=TVFailure.invalidURL.localizedDescription;return}
         let position=channel.kind=="live" || !resume ? 0 : history.first{$0.id==channel.id}?.position ?? 0
         let list=rows ?? visible();let request=UUID();playbackRequest=request
         Task{try? await Task.sleep(for:.milliseconds(650));guard playbackRequest==request else{return};player=PlayerSession(channel:channel,channels:list,resume:position,model:self)}
+    }
+    func refreshDaddy(force:Bool=false)async{
+        guard !daddyBusy else{return}
+        guard daddyEnabled else{channels.removeAll{$0.sourceID=="daddylive"};daddyEvents=[];daddyError="";if sourceFilter=="daddylive"{sourceFilter="All sources"};return}
+        daddyBusy=true;defer{daddyBusy=false};daddyError=""
+        do{let rows=try await DaddyLive.loadChannels(force:force);if daddyEnabled{channels.removeAll{$0.sourceID=="daddylive"};channels += rows;indexGuides()}}catch{daddyError="Channels: "+error.localizedDescription}
+        do{let events=try await DaddyLive.loadEvents(force:force);if daddyEnabled{daddyEvents=events}}catch{daddyError += (daddyError.isEmpty ? "":"\n")+"Schedule: "+error.localizedDescription}
     }
     func sample(){play(TVChannel(id:"apple-sample",sourceID:"sample",sourceName:"Apple sample",name:"Playback test",url:"https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",kind:"movie"),within:[])}
 }

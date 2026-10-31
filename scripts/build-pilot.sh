@@ -3,6 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 mkdir -p build dist
+if [[ "${CTV_BUILD_NATIVE_SOURCE:-0}" = 1 ]]; then
+  bash scripts/build-native.sh
+else
+  bash scripts/fetch-native.sh
+fi
 command -v xcodegen >/dev/null || { echo 'Install XcodeGen before building.' >&2; exit 1; }
 {
   xcodebuild -version
@@ -62,17 +67,18 @@ stage="$(mktemp -d "${TMPDIR:-/tmp}/contenttv-pilot.XXXXXX")"
 trap 'rm -rf -- "$stage"' EXIT
 mkdir -p "$stage/Payload"
 ditto "$app" "$stage/Payload/ContentTV.app"
-archive="$PWD/dist/Content-TV-tvOS-0.2.0-unsigned.ipa"
+archive="$PWD/dist/Content-TV-tvOS-0.3.0-unsigned.ipa"
 # A fresh stage ensures each IPA contains only this build's application.
 (cd "$stage"; COPYFILE_DISABLE=1 /usr/bin/zip -qr "$stage/package.ipa" Payload)
 mv -f "$stage/package.ipa" "$archive"
 python3 scripts/verify_ipa.py "$archive"
-(cd dist; shasum -a 256 Content-TV-tvOS-0.2.0-unsigned.ipa) > dist/SHA256.txt
+(cd dist; shasum -a 256 Content-TV-tvOS-0.3.0-unsigned.ipa) > dist/SHA256.txt
 {
-  echo 'Content TV tvOS 0.2.0 — unsigned device build'
+  echo 'Content TV tvOS 0.3.0 — unsigned device build'
   echo "Commit: ${GITHUB_SHA:-local}"
   cat build/toolchain.txt
   cat build/macho-platform.txt
   echo 'Simulator unit tests must pass before packaging.'
   echo 'Physical Apple TV installation and playback require local signing and device testing.'
 } > dist/BUILD-INFO.txt
+

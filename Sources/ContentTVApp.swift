@@ -18,7 +18,7 @@ struct RootScreen:View {
             VStack(alignment:.leading,spacing:24){
                 Text("CONTENT\nTV").font(.system(size:30,weight:.black)).foregroundStyle(.cyan).padding(.bottom,30)
                 ForEach(Section.allCases){item in Button{section=item} label:{Label(item.rawValue,systemImage:item.icon).font(.system(size:20,weight:section==item ? .bold:.regular)).frame(width:180,alignment:.leading).padding(.vertical,8).foregroundStyle(section==item ? .cyan:.white)}.buttonStyle(.plain)}
-                Spacer();Text("0.2.0 · tvOS").font(.caption2).foregroundStyle(.secondary)
+                Spacer();Text("0.3.0 · tvOS").font(.caption2).foregroundStyle(.secondary)
             }.frame(width:200).padding(.vertical,30)
             Group{switch section{case .home:HomeScreen();case .search:SearchScreen();case .library:LibraryScreen();case .live:LiveScreen();case .sports:SportsScreen();case .settings:SettingsScreen()}}.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
         }.padding(50).background(Color(red:0.025,green:0.035,blue:0.065)).task{await model.start()}
@@ -78,8 +78,10 @@ struct SearchScreen:View {
 struct LibraryScreen:View {
     @EnvironmentObject var model:AppModel
     @State private var selected:TVTitle?
+    @State private var torrents=false
     var body:some View{ScrollView{VStack(alignment:.leading,spacing:25){
         Text("Library").font(.largeTitle).bold()
+        Button("Open magnet / .torrent URL"){torrents=true}
         Text("Saved titles").font(.title2)
         if model.saved.isEmpty{Text("Save movies and series from their detail pages.").foregroundStyle(.secondary)}else{TitleRows(titles:model.saved,selected:$selected)}
         Text("Favourite channels").font(.title2)
@@ -88,7 +90,7 @@ struct LibraryScreen:View {
         ForEach(favourites){ChannelButton(channel:$0,rows:favourites)}
         Text("Recently watched").font(.title2)
         ForEach(model.history){entry in Button{model.play(entry.channel)} label:{HStack{Text(entry.channel.name);Spacer();Text(entry.channel.kind=="live" ? "Live":"Resume").foregroundStyle(.secondary)}}}
-    }.padding(20)}.sheet(item:$selected){TitleScreen(original:$0)}}
+    }.padding(20)}.sheet(item:$selected){TitleScreen(original:$0)}.sheet(isPresented:$torrents){TorrentScreen()}}
 }
 struct ChannelButton:View {
     @EnvironmentObject var model:AppModel
@@ -113,7 +115,7 @@ struct LiveScreen:View {
         Text("Live TV").font(.largeTitle).bold()
         HStack{
             Menu("\(kind=="live" ? "Channels":kind=="movie" ? "Source movies":"Source series")"){ForEach(["live","movie","series"],id:\.self){value in Button(value=="live" ? "Channels":value=="movie" ? "Source movies":"Source series"){kind=value;load()}}}
-            Menu(sourceName){Button("All sources"){model.sourceFilter="All sources";group="All groups";load()};ForEach(model.sources){source in Button(source.name){model.sourceFilter=source.id;group="All groups";load()}}}
+            Menu(sourceName){Button("All sources"){model.sourceFilter="All sources";group="All groups";load()};ForEach(model.sources){source in Button(source.name){model.sourceFilter=source.id;group="All groups";load()}};if model.daddyEnabled{Button("DaddyLive"){model.sourceFilter="daddylive";group="All groups";kind="live"}}}
             if kind=="live"{Menu(group){ForEach(model.groups,id:\.self){value in Button(value){group=value}}}}
         }.font(.callout)
         HStack{
@@ -123,13 +125,14 @@ struct LiveScreen:View {
             Button("Refresh"){if kind=="live"{Task{await model.refreshSources(force:true)}}else{load(force:true)}}.disabled(model.busy || loading)
         }.font(.callout)
         if model.busy || loading{ProgressView("Loading sources…")}
+        if model.daddyEnabled && !model.daddyError.isEmpty{Text(model.daddyError).font(.caption).foregroundStyle(.orange)}
         if rows.isEmpty{Text(model.sources.isEmpty ? "Add an M3U or Xtream source in Settings.":kind=="live" ? "No channels in this selection.":"Source movies and series require an Xtream source with that catalogue.").foregroundStyle(.secondary)}
         ScrollView{
             if model.listMode{LazyVStack(spacing:22){ForEach(rows){channel in row(channel)}}.padding(20)}
             else{LazyVGrid(columns:[GridItem(.adaptive(minimum:270))],spacing:30){ForEach(rows){channel in row(channel)}}.padding(20)}
         }
     }.padding(20).sheet(item:$selectedSeries){SeriesScreen(series:$0)}}
-    private var sourceName:String{model.sources.first{$0.id==model.sourceFilter}?.name ?? "All sources"}
+    private var sourceName:String{model.sourceFilter=="daddylive" ? "DaddyLive":model.sources.first{$0.id==model.sourceFilter}?.name ?? "All sources"}
     @ViewBuilder private func row(_ channel:TVChannel)->some View{if kind=="series"{Button(channel.name){selectedSeries=channel}}else{ChannelButton(channel:channel,rows:kind=="live" ? rows:[])}}
     private func load(force:Bool=false){guard kind != "live" else{return};let requested=kind;loading=true;Task{let items=await model.sourceTitles(kind:requested,force:force);if kind==requested{vod=items};loading=false}}
 }
@@ -164,13 +167,24 @@ struct TitleScreen:View {
 }
 struct SportsScreen:View {
     @EnvironmentObject var model:AppModel
+    @State private var limit=40
     var body:some View{ScrollView{VStack(alignment:.leading,spacing:25){
         Text("Game Day").font(.largeTitle).bold()
         Text("Today’s sports from your matched programme guides").foregroundStyle(.secondary)
         Button("Refresh guides"){Task{await model.refreshGuides(force:true)}}.disabled(model.guideBusy)
         if model.guideBusy{ProgressView()}
+        if model.daddyEnabled{
+            Text("DaddyLive schedule").font(.title2)
+            Button(model.daddyBusy ? "Loading…":"Refresh DaddyLive schedule"){Task{await model.refreshDaddy(force:true)}}.disabled(model.daddyBusy)
+            if !model.daddyError.isEmpty{Text(model.daddyError).font(.caption).foregroundStyle(.orange)}
+            Text(model.daddyEvents.first?.scheduleDate ?? "No provider schedule returned. Times are as supplied by the provider.").font(.caption).foregroundStyle(.secondary)
+            ForEach(Array(model.daddyEvents.prefix(limit))){event in VStack(alignment:.leading,spacing:14){Text(event.time+" · "+event.name).font(.headline);Text(event.category).font(.caption).foregroundStyle(.cyan);ForEach(event.channels){channel in ChannelButton(channel:channel,rows:model.channels.filter{$0.sourceID=="daddylive"})}}}
+            if model.daddyEvents.count>limit{Button("Show more events"){limit += 40}}
+            Divider();Text("Your programme guides").font(.title2)
+        }
         if model.events.isEmpty{Text("No sports events found. Add channels and enable matching XMLTV feeds in Settings. Events depend on the feed’s programme titles and categories.").foregroundStyle(.secondary)}
         ForEach(model.events){event in VStack(alignment:.leading,spacing:15){Text(event.programme.title).font(.title2);Text(event.programme.start.formatted(date:.abbreviated,time:.shortened)).foregroundStyle(.cyan);Text(event.programme.detail).font(.caption).lineLimit(3);ForEach(event.channels){channel in ChannelButton(channel:channel,rows:model.visible())}}.padding(.vertical,12)}
     }.padding(20)}}
 }
+
 

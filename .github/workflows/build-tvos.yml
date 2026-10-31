@@ -28,16 +28,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="v0.2.0-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          tag="v0.3.0-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           cat > build/release-notes.txt <<'NOTES'
-          Content TV 0.2.0 native tvOS first feature build. See README.md for scope and limitations.
+          Content TV 0.3.0 native tvOS DaddyLive, torrents and HLS DRM build. See README.md for scope and limitations.
           This IPA is UNSIGNED: re-sign locally with your own free Apple account and a compatible installer.
           No Apple credentials, certificates, playlists or paid-account entitlements are included.
           Simulator tests and package checks precede upload; physical-device installation/playback is not yet verified.
           See README.md for installation and the acceptance checklist.
           NOTES
-          gh release create "$tag" dist/Content-TV-tvOS-0.2.0-unsigned.ipa dist/SHA256.txt dist/BUILD-INFO.txt dist/Content-TV-tvOS-preview.png \
-            --target "$GITHUB_SHA" --prerelease --title "Content TV tvOS 0.2.0 — build ${GITHUB_RUN_NUMBER}" \
+          gh release create "$tag" dist/Content-TV-tvOS-0.3.0-unsigned.ipa dist/SHA256.txt dist/BUILD-INFO.txt dist/Content-TV-tvOS-preview.png \
+            --target "$GITHUB_SHA" --prerelease --title "Content TV tvOS 0.3.0 — build ${GITHUB_RUN_NUMBER}" \
             --notes-file build/release-notes.txt
           echo "Download the unsigned IPA from the repository's Releases page." >> "$GITHUB_STEP_SUMMARY"
+
 

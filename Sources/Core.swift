@@ -25,11 +25,13 @@ enum SourceKind:String,Codable,CaseIterable {case m3u="M3U playlist",xtream="Xtr
 struct TVSource:Codable,Identifiable,Equatable {
     var id=UUID().uuidString;var name="";var kind:SourceKind = .m3u
     var address="";var username="";var password="";var guides:[String]=[];var offsetMinutes=0
+    var fairPlay:DRMConfig?=nil
 }
 struct TVChannel:Codable,Identifiable,Hashable {
     var id:String;var sourceID:String;var sourceName:String;var name:String;var url:String
     var group:String="Other";var guideID:String="";var logo:String="";var kind:String="live"
     var seriesID:String="";var summary:String="";var headers:[String:String]=[:];var restriction:String=""
+    var transport:String?=nil;var drm:DRMConfig?=nil
 }
 struct TVTitle:Codable,Identifiable,Hashable {
     var id:String;var kind:String;var name:String;var poster:String="";var backdrop:String="";var year:String="";var plot:String="";var rating:String="";var genres:[String]=[]
@@ -72,25 +74,29 @@ enum PlaylistParser {
         return result
     }
     static func parse(_ text:String,source:TVSource)->(channels:[TVChannel],guides:[String]) {
-        var rows:[TVChannel]=[];var seen=Set<String>();var attrs:[String:String]=[:];var name="";var group="";var headers:[String:String]=[:];var restriction="";var guides:[String]=[]
+        var rows:[TVChannel]=[];var seen=Set<String>();var attrs:[String:String]=[:];var name="";var group="";var headers:[String:String]=[:];var restriction="";var guides:[String]=[];var properties:[String:String]=[:]
         for raw in text.replacingOccurrences(of:"\u{feff}",with:"").components(separatedBy:.newlines) {
             let line=raw.trimmingCharacters(in:.whitespacesAndNewlines);if line.isEmpty{continue}
             if line.hasPrefix("#EXTM3U"){let a=attributes(line);for key in ["x-tvg-url","url-tvg","tvg-url"]{if let value=a[key]{guides += value.split(separator:",").map(String.init).filter{webURL($0) != nil}}}}
             else if line.hasPrefix("#EXTINF:") {
-                attrs=attributes(line);headers=[:];restriction="";group=attrs["group-title"] ?? "Other"
+                attrs=attributes(line);headers=[:];restriction="";properties=[:];group=attrs["group-title"] ?? "Other"
                 // The display-name comma is outside quoted attribute values.
                 var quoted:Character?;var separator:String.Index?
                 for index in line.indices{let c=line[index];if c=="\"" || c=="'"{if quoted==c{quoted=nil}else if quoted==nil{quoted=c}}else if c=="," && quoted==nil{separator=index;break}}
                 name=separator.map{String(line[line.index(after:$0)...]).trimmingCharacters(in:.whitespaces)} ?? attrs["tvg-name"] ?? "Channel"
             } else if line.hasPrefix("#EXTGRP:"){group=String(line.dropFirst(8))}
             else if line.lowercased().hasPrefix("#extvlcopt:"){let pair=line.dropFirst(11).split(separator:"=",maxSplits:1).map(String.init);if pair.count==2{let key=pair[0].lowercased();if key=="http-user-agent"{headers["User-Agent"]=pair[1]};if key=="http-referrer" || key=="http-referer"{headers["Referer"]=pair[1]}}}
-            else if line.lowercased().hasPrefix("#kodiprop:") && (line.lowercased().contains("license") || line.lowercased().contains("widevine") || line.lowercased().contains("clearkey")){restriction="This source declares protected playback. DRM support is not included in this first tvOS release."}
+            else if line.lowercased().hasPrefix("#kodiprop:"){let p=line.dropFirst(10).split(separator:"=",maxSplits:1).map(String.init);if p.count==2{properties[p[0].lowercased()]=p[1]}}
             else if !line.hasPrefix("#"),!name.isEmpty {
                 let parts=line.split(separator:"|",maxSplits:1).map(String.init);let address=parts[0]
                 if parts.count==2{for part in parts[1].split(separator:"&"){let pair=part.split(separator:"=",maxSplits:1).map(String.init);if pair.count==2{let key=pair[0].removingPercentEncoding ?? pair[0];let value=pair[1].removingPercentEncoding ?? pair[1];if !key.contains("\n") && !value.contains("\r") && !value.contains("\n"){headers[key]=value}}}}
                 if let url=URL(string:address,relativeTo:webURL(source.address))?.absoluteURL,webURL(url.absoluteString) != nil {
                     let guideID=attrs["tvg-id"] ?? "";let id=source.id+":"+stableID(guideID+"|"+url.absoluteString)
-                    if seen.insert(id).inserted{rows.append(TVChannel(id:id,sourceID:source.id,sourceName:source.name,name:name,url:url.absoluteString,group:group.isEmpty ? "Other":group,guideID:guideID,logo:attrs["tvg-logo"] ?? "",headers:headers,restriction:restriction))}
+                    var drm=DRMConfig.declaration(properties,attributes:attrs)
+                    if drm?.scheme=="fairplay",let configured=source.fairPlay{if drm!.certificateURL.isEmpty{drm!.certificateURL=configured.certificateURL};if drm!.licenseURL.isEmpty{drm!.licenseURL=configured.licenseURL};if drm!.contentID.isEmpty{drm!.contentID=configured.contentID};drm!.requestFormat=configured.requestFormat;drm!.responseFormat=configured.responseFormat;drm!.headers.merge(configured.headers){old,_ in old}}
+                    if drm==nil{drm=source.fairPlay}
+                    restriction=drm?.failure ?? ""
+                    if seen.insert(id).inserted{rows.append(TVChannel(id:id,sourceID:source.id,sourceName:source.name,name:name,url:url.absoluteString,group:group.isEmpty ? "Other":group,guideID:guideID,logo:attrs["tvg-logo"] ?? "",headers:headers,restriction:restriction,drm:drm))}
                 }
                 name="";attrs=[:];headers=[:];restriction=""
             }

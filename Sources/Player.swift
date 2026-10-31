@@ -45,6 +45,9 @@ struct Quality:Identifiable,Equatable {
     private var timeObserver:Any?
     private var endObserver:NSObjectProtocol?
     private var loadTask:Task<Void,Never>?
+    private var relay:MediaRelay?
+    private var fairPlay:FairPlaySession?
+    private var interruptedTorrent=false
     private weak var model:AppModel?
     private var resume:Double
     private var shouldResume=false
@@ -61,14 +64,40 @@ struct Quality:Identifiable,Equatable {
     var browserChannels:[TVChannel]{channels.filter{group=="All groups" || $0.group==group}}
     var availableGroups:[String]{["All groups"]+Set(channels.map(\.group)).sorted()}
     var alternateStreams:[TVChannel]{guard !channel.guideID.isEmpty else{return []};return channels.filter{$0.id != channel.id && $0.sourceID==channel.sourceID && $0.guideID==channel.guideID}}
-    func tune(_ next:TVChannel){
+    func tune(_ next:TVChannel,autoplay:Bool=true){
         guard !stopped else{return}
         save();loadTask?.cancel();statusObservation=nil
+        releaseRelay()
+        if channel.transport?.hasPrefix("torrent:")==true && next.transport?.hasPrefix("torrent:") != true{Task{await TorrentManager.shared.stop()}}
+        player.pause();player.replaceCurrentItem(with:nil)
         if let observer=endObserver{NotificationCenter.default.removeObserver(observer);endObserver=nil}
         channel=next;preview=next;failed=false;status="Connecting…";audio=[];subtitles=[];qualities=[];audible=nil;legible=nil;selectedQuality="Auto";selectedAudio="";selectedSubtitle="Off";duration=0;position=0
-        if !next.restriction.isEmpty || !next.headers.isEmpty{failed=true;status=next.restriction.isEmpty ? "Custom HTTP headers are unsupported in this release.":next.restriction;player.replaceCurrentItem(with:nil);return}
-        guard let url=webURL(next.url) else{failed=true;status=TVFailure.invalidURL.localizedDescription;return}
-        let asset=AVURLAsset(url:url);let item=AVPlayerItem(asset:asset);player.replaceCurrentItem(with:item)
+        if !next.restriction.isEmpty{failed=true;status=next.restriction;controls=true;return}
+        loadTask=Task{[weak self]in guard let self=self else{return}
+            do{
+                let url:URL
+                if let transport=next.transport,transport.hasPrefix("torrent:"),let index=Int(transport.dropFirst(8)){
+                    status="Getting torrent metadata / buffering…"
+                    let gb=UserDefaults.standard.integer(forKey:"torrentLimitGB");url=try await TorrentManager.shared.prepare(next.url,index:index,limit:Int64(gb==0 ? 8:gb)*1024*1024*1024)
+                }else{
+                    var original:URL;var headers=next.headers;var daddy:DaddySession?
+                    if next.transport=="daddy"{status="Resolving DaddyLive…";let result=try await DaddyLive.resolve(next);original=result.0;headers=result.1;daddy=result.2}
+                    else{guard let parsed=webURL(next.url)else{throw TVFailure.invalidURL};original=parsed}
+                    guard original.pathExtension.lowercased() != "mpd"else{throw TVFailure.unsupported("MPEG-DASH/CENC playback is not supported by this tvOS player. Use a provider-supplied compatible HLS stream.")}
+                    if !headers.isEmpty || daddy != nil || next.drm?.scheme=="clearkey"{
+                        let transport=MediaRelay(headers:headers,daddy:daddy,drm:next.drm);relay=transport;url=try await transport.start(original)
+                    }else{url=original}
+                }
+                try Task.checkCancellation();guard !stopped,channel.id==next.id else{return}
+                let asset=AVURLAsset(url:url)
+                if let config=next.drm,config.scheme=="fairplay"{let session=FairPlaySession(config:config,asset:asset);session.failure={[weak self] message in Task{@MainActor [weak self]in self?.status=message;self?.failed=true;self?.controls=true}};fairPlay=session}
+                let item=AVPlayerItem(asset:asset);connect(item,autoplay:autoplay)
+                await loadTracks(asset,item:item,url:url)
+            }catch is CancellationError{}catch{if !Task.isCancelled{failed=true;controls=true;status=error.localizedDescription}}
+        }
+    }
+    private func connect(_ item:AVPlayerItem,autoplay:Bool){
+        player.replaceCurrentItem(with:item)
         statusObservation=item.observe(\.status,options:[.initial,.new]){[weak self] item,_ in
             Task{@MainActor [weak self] in guard let self=self,self.player.currentItem===item else{return}
                 if item.status == .failed{self.failed=true;self.status="Playback failed. The format, connection or source may be incompatible with Apple TV.";self.controls=true}
@@ -76,9 +105,9 @@ struct Quality:Identifiable,Equatable {
             }
         }
         endObserver=NotificationCenter.default.addObserver(forName:.AVPlayerItemDidPlayToEndTime,object:item,queue:.main){[weak self] _ in Task{@MainActor [weak self] in self?.controls=true;self?.playing=false;self?.save()}}
-        player.play()
-        loadTask=Task{[weak self] in
-            guard let self=self else{return}
+        if autoplay{player.play()}
+    }
+    private func loadTracks(_ asset:AVURLAsset,item:AVPlayerItem,url:URL)async{
             let a=try? await asset.loadMediaSelectionGroup(for:.audible)
             let s=try? await asset.loadMediaSelectionGroup(for:.legible)
             guard !Task.isCancelled,self.player.currentItem===item else{return}
@@ -89,7 +118,6 @@ struct Quality:Identifiable,Equatable {
                 self.selectedAudio=item.currentMediaSelection.selectedMediaOption(in:group)?.displayName ?? "Default"
             }
             if url.pathExtension.lowercased()=="m3u8",let data=try? await HTTP.data(url.absoluteString,limit:1024*1024),let text=String(data:data,encoding:.utf8),!Task.isCancelled,self.player.currentItem===item{self.qualities=Quality.parse(text)}
-        }
     }
     func step(_ delta:Int){guard channel.kind=="live",let next=steppedChannel(channels,current:channel,step:delta) else{return};resume=0;tune(next)}
     func toggle(){if player.rate==0{player.play()}else{player.pause()}}
@@ -97,12 +125,13 @@ struct Quality:Identifiable,Equatable {
     func chooseAudio(_ option:AVMediaSelectionOption){guard let group=audible else{return};player.currentItem?.select(option,in:group);selectedAudio=option.displayName;UserDefaults.standard.set(option.extendedLanguageTag ?? option.locale?.identifier ?? "",forKey:"audioLanguage");menu=""}
     func chooseSubtitle(_ option:AVMediaSelectionOption?){guard let group=legible else{return};player.currentItem?.select(option,in:group);selectedSubtitle=option?.displayName ?? "Off";menu=""}
     func quality(_ value:Quality?){player.currentItem?.preferredPeakBitRate=value?.bitrate ?? 0;player.currentItem?.preferredMaximumResolution=CGSize(width:value?.width ?? 0,height:value?.height ?? 0);selectedQuality=value?.label ?? "Auto";menu=""}
-    func background(){shouldResume=player.rate>0;player.pause();save()}
-    func foreground(){if shouldResume{player.play()};shouldResume=false}
+    func background(){shouldResume=playing || player.rate>0;player.pause();save();if channel.transport?.hasPrefix("torrent:")==true{interruptedTorrent=true;loadTask?.cancel();Task{await TorrentManager.shared.stop()}}}
+    func foreground(){if interruptedTorrent{interruptedTorrent=false;resume=position;tune(channel,autoplay:shouldResume)}else if shouldResume{player.play()};shouldResume=false}
     func save(){guard player.currentItem != nil else{return};model?.record(channel,position:position,duration:duration)}
     func back(){if !menu.isEmpty{menu=""}else if groups{groups=false}else if browser{browser=false}else if controls{controls=false}else{close()}}
     func close(){stop();model?.player=nil}
-    func stop(){guard !stopped else{return};stopped=true;save();player.pause();loadTask?.cancel();statusObservation=nil;playbackObservation=nil;if let token=timeObserver{player.removeTimeObserver(token);timeObserver=nil};if let observer=endObserver{NotificationCenter.default.removeObserver(observer);endObserver=nil};player.replaceCurrentItem(with:nil)}
+    private func releaseRelay(){if let relay=relay{Task{await relay.stop()};self.relay=nil};fairPlay?.stop();fairPlay=nil}
+    func stop(){guard !stopped else{return};stopped=true;save();player.pause();loadTask?.cancel();releaseRelay();if channel.transport?.hasPrefix("torrent:")==true{Task{await TorrentManager.shared.stop()}};statusObservation=nil;playbackObservation=nil;if let token=timeObserver{player.removeTimeObserver(token);timeObserver=nil};if let observer=endObserver{NotificationCenter.default.removeObserver(observer);endObserver=nil};player.replaceCurrentItem(with:nil)}
 }
 
 struct VideoSurface:UIViewRepresentable {
