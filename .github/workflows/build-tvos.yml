@@ -1,0 +1,43 @@
+name: Build Content TV for Apple TV (unsigned)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: content-tv-tvos
+  cancel-in-progress: true
+jobs:
+  build:
+    # Public standard runners are free. Do not silently consume private paid usage.
+    if: github.event.repository.private == false
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install project generator
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+      - name: Test IPA validator
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Generate, test and build device IPA
+        run: bash scripts/build-pilot.sh
+      - name: Publish unsigned tvOS app as a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v0.2.0-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          cat > build/release-notes.txt <<'NOTES'
+          Content TV 0.2.0 native tvOS first feature build. See README.md for scope and limitations.
+          This IPA is UNSIGNED: re-sign locally with your own free Apple account and a compatible installer.
+          No Apple credentials, certificates, playlists or paid-account entitlements are included.
+          Simulator tests and package checks precede upload; physical-device installation/playback is not yet verified.
+          See README.md for installation and the acceptance checklist.
+          NOTES
+          gh release create "$tag" dist/Content-TV-tvOS-0.2.0-unsigned.ipa dist/SHA256.txt dist/BUILD-INFO.txt dist/Content-TV-tvOS-preview.png \
+            --target "$GITHUB_SHA" --prerelease --title "Content TV tvOS 0.2.0 — build ${GITHUB_RUN_NUMBER}" \
+            --notes-file build/release-notes.txt
+          echo "Download the unsigned IPA from the repository's Releases page." >> "$GITHUB_STEP_SUMMARY"
+

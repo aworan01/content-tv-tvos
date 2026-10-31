@@ -1,0 +1,12 @@
+build/
+dist/
+*.xcodeproj/
+*.xcworkspace/
+*.xcresult/
+.DS_Store
+*.p12
+*.mobileprovision
+*.key
+.env
+__pycache__/
+*.pyc

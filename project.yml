@@ -1,0 +1,60 @@
+name: ContentTV
+options:
+  minimumXcodeGenVersion: 2.44.0
+  deploymentTarget:
+    tvOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_OBJC_BRIDGING_HEADER: Support/ContentTV-Bridging-Header.h
+    HEADER_SEARCH_PATHS: $(SRCROOT)/Support
+    OTHER_LDFLAGS: -lz
+    CLANG_ENABLE_MODULES: YES
+targets:
+  ContentTV:
+    type: application
+    platform: tvOS
+    sources:
+      - Sources
+      - Support
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Content TV
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "2"
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: Connect to media sources on your home network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsArbitraryLoadsForMedia: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tv.content.tvos.aworan01
+        TARGETED_DEVICE_FAMILY: "3"
+        GENERATE_INFOPLIST_FILE: NO
+  ContentTVTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources:
+      - Tests
+    dependencies:
+      - target: ContentTV
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tv.content.tvos.aworan01.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+schemes:
+  ContentTV:
+    build:
+      targets:
+        ContentTV: all
+    test:
+      targets:
+        - ContentTVTests
