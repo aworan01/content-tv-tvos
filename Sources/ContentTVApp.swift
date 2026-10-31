@@ -17,7 +17,7 @@ struct RootScreen:View {
         HStack(alignment:.top,spacing:30){
             VStack(alignment:.leading,spacing:24){
                 Text("CONTENT\nTV").font(.system(size:30,weight:.black)).foregroundStyle(.cyan).padding(.bottom,30)
-                ForEach(Section.allCases){item in Button{section=item}{Label(item.rawValue,systemImage:item.icon).font(.system(size:20,weight:section==item ? .bold:.regular)).frame(width:180,alignment:.leading).padding(.vertical,8).foregroundStyle(section==item ? .cyan:.white)}.buttonStyle(.plain)}
+                ForEach(Section.allCases){item in Button{section=item} label:{Label(item.rawValue,systemImage:item.icon).font(.system(size:20,weight:section==item ? .bold:.regular)).frame(width:180,alignment:.leading).padding(.vertical,8).foregroundStyle(section==item ? .cyan:.white)}.buttonStyle(.plain)}
                 Spacer();Text("0.2.0 · tvOS").font(.caption2).foregroundStyle(.secondary)
             }.frame(width:200).padding(.vertical,30)
             Group{switch section{case .home:HomeScreen();case .search:SearchScreen();case .library:LibraryScreen();case .live:LiveScreen();case .sports:SportsScreen();case .settings:SettingsScreen()}}.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
@@ -38,7 +38,7 @@ struct Poster:View {
 struct TitleRows:View {
     var titles:[TVTitle]
     @Binding var selected:TVTitle?
-    var body:some View{ScrollView(.horizontal){LazyHStack(spacing:30){ForEach(titles){title in Button{selected=title}{Poster(title:title)}.buttonStyle(.plain)}}.padding(20)}.padding(-20)}
+    var body:some View{ScrollView(.horizontal){LazyHStack(spacing:30){ForEach(titles){title in Button{selected=title} label:{Poster(title:title)}.buttonStyle(.plain)}}.padding(20)}.padding(-20)}
 }
 struct HomeScreen:View {
     @EnvironmentObject var model:AppModel
@@ -68,7 +68,7 @@ struct SearchScreen:View {
         Button("Search movies and series"){search()}.disabled(searching || query.trimmingCharacters(in:.whitespaces).isEmpty)
         if searching{ProgressView()};if !failure.isEmpty{Text(failure).foregroundStyle(.secondary)}
         if !matches.isEmpty{Text("Your channels").font(.title2);ForEach(matches){channel in ChannelButton(channel:channel,rows:matches)}}
-        if !results.isEmpty{Text("Catalogue results").font(.title2);LazyVGrid(columns:[GridItem(.adaptive(minimum:170))],spacing:30){ForEach(results){title in Button{selected=title}{Poster(title:title)}.buttonStyle(.plain)}}}
+        if !results.isEmpty{Text("Catalogue results").font(.title2);LazyVGrid(columns:[GridItem(.adaptive(minimum:170))],spacing:30){ForEach(results){title in Button{selected=title} label:{Poster(title:title)}.buttonStyle(.plain)}}}
     }.padding(20)}.sheet(item:$selected){TitleScreen(original:$0)}.onDisappear{searchTask?.cancel()}}
     private func search(){
         let term=query.trimmingCharacters(in:.whitespacesAndNewlines);guard !term.isEmpty else{return};searchTask?.cancel();searching=true;failure=""
@@ -87,14 +87,14 @@ struct LibraryScreen:View {
         if favourites.isEmpty{Text("Add favourites from the live player's Options menu.").foregroundStyle(.secondary)}
         ForEach(favourites){ChannelButton(channel:$0,rows:favourites)}
         Text("Recently watched").font(.title2)
-        ForEach(model.history){entry in Button{model.play(entry.channel)}{HStack{Text(entry.channel.name);Spacer();Text(entry.channel.kind=="live" ? "Live":"Resume").foregroundStyle(.secondary)}}}
+        ForEach(model.history){entry in Button{model.play(entry.channel)} label:{HStack{Text(entry.channel.name);Spacer();Text(entry.channel.kind=="live" ? "Live":"Resume").foregroundStyle(.secondary)}}}
     }.padding(20)}.sheet(item:$selected){TitleScreen(original:$0)}}
 }
 struct ChannelButton:View {
     @EnvironmentObject var model:AppModel
     var channel:TVChannel
     var rows:[TVChannel]
-    var body:some View{Button{model.play(channel,within:rows)}{HStack(spacing:18){
+    var body:some View{Button{model.play(channel,within:rows)} label:{HStack(spacing:18){
         AsyncImage(url:webURL(channel.logo)){image in image.resizable().scaledToFit()}placeholder:{Image(systemName:"tv")}.frame(width:55,height:45)
         VStack(alignment:.leading,spacing:5){Text(channel.name).font(.headline);Text(model.now(channel)?.title ?? channel.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)}
         Spacer();if model.favouriteIDs.contains(channel.id){Image(systemName:"star.fill").foregroundStyle(.yellow)}
@@ -141,7 +141,7 @@ struct SeriesScreen:View {
     @State private var message="Loading episodes…"
     var body:some View{ScrollView{VStack(alignment:.leading,spacing:25){Text(series.name).font(.largeTitle);Button("Close"){dismiss()};if episodes.isEmpty{Text(message)};ForEach(episodes){episode in Button(episode.name){dismiss();Task{try? await Task.sleep(for:.milliseconds(350));model.play(episode,within:[])}}}}.padding(70)}.task{
         do{guard let source=model.sources.first(where:{$0.id==series.sourceID})else{throw TVFailure.invalidData};episodes=try await Xtream.episodes(source,series:series);message="No episodes returned."}catch{message=error.localizedDescription}
-    }}
+    }.onChange(of:model.playbackRequest){_,_ in dismiss()}}
 }
 struct TitleScreen:View {
     @EnvironmentObject var model:AppModel
@@ -160,7 +160,7 @@ struct TitleScreen:View {
         if loading{ProgressView()}
         if searched && matches.isEmpty{Text("No matching title found in your sources. Add an Xtream source with movies or series, or browse its catalogue in Live TV.")}
         ForEach(matches){channel in Button(channel.name+" · "+channel.sourceName){if channel.kind=="series"{series=channel}else{dismiss();Task{try? await Task.sleep(for:.milliseconds(350));model.play(channel,within:[])}}}}
-    }.padding(70)}.task{detail=try? await Catalogues.detail(original)}.sheet(item:$series){SeriesScreen(series:$0)}}
+    }.padding(70)}.task{detail=try? await Catalogues.detail(original)}.sheet(item:$series){SeriesScreen(series:$0)}.onChange(of:model.playbackRequest){_,_ in dismiss()}}
 }
 struct SportsScreen:View {
     @EnvironmentObject var model:AppModel
@@ -173,3 +173,4 @@ struct SportsScreen:View {
         ForEach(model.events){event in VStack(alignment:.leading,spacing:15){Text(event.programme.title).font(.title2);Text(event.programme.start.formatted(date:.abbreviated,time:.shortened)).foregroundStyle(.cyan);Text(event.programme.detail).font(.caption).lineLimit(3);ForEach(event.channels){channel in ChannelButton(channel:channel,rows:model.visible())}}.padding(.vertical,12)}
     }.padding(20)}}
 }
+

@@ -25,6 +25,7 @@ import SwiftUI
     @Published var providerIDs:Set<String>=["nfx","hbm","dnp"] {didSet{defaults.set(Array(providerIDs),forKey:"providerIDs")}}
     @Published var overrides:[String:String]=[:] {didSet{defaults.set(overrides,forKey:"guideOverrides");indexGuides()}}
     @Published var player:PlayerSession?
+    @Published var playbackRequest=UUID()
     private let defaults=UserDefaults.standard
     private var privateReadable=true
     private var guideMatches:[String:String]=[:]
@@ -158,7 +159,8 @@ import SwiftUI
         if !channel.headers.isEmpty{message="This entry requires custom HTTP headers. Header-dependent playback is not supported in this tvOS release.";return}
         guard webURL(channel.url) != nil else{message=TVFailure.invalidURL.localizedDescription;return}
         let position=channel.kind=="live" || !resume ? 0 : history.first{$0.id==channel.id}?.position ?? 0
-        player=PlayerSession(channel:channel,channels:rows ?? visible(),resume:position,model:self)
+        let list=rows ?? visible();let request=UUID();playbackRequest=request
+        Task{try? await Task.sleep(for:.milliseconds(650));guard playbackRequest==request else{return};player=PlayerSession(channel:channel,channels:list,resume:position,model:self)}
     }
     func sample(){play(TVChannel(id:"apple-sample",sourceID:"sample",sourceName:"Apple sample",name:"Playback test",url:"https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",kind:"movie"),within:[])}
 }

@@ -123,7 +123,7 @@ struct PlayerScreen:View {
             ZStack(alignment:.bottom){
                 Color.black;VideoSurface(player:session.player)
                 if !session.controls && !session.browser && session.menu.isEmpty{
-                    Button{session.controls=true}{Color.clear.contentShape(Rectangle())}.buttonStyle(.plain).focusEffectDisabled()
+                    Button{session.controls=true} label:{Color.clear.contentShape(Rectangle())}.buttonStyle(.plain).focusEffectDisabled()
                         .onMoveCommand{direction in switch direction{case .up:session.step(1);case .down:session.step(-1);case .right:session.preview=session.channel;session.browser=true;focusedChannel=session.channel.id;default:break}}
                 }
                 if !session.status.isEmpty{VStack{Text(session.status).font(.headline).padding().background(.black.opacity(0.8));Spacer()}.padding(50).allowsHitTesting(false)}
@@ -158,9 +158,9 @@ struct PlayerScreen:View {
                 }else{
                     Text("← Groups").font(.caption).foregroundStyle(.secondary)
                     ScrollViewReader{proxy in ScrollView{LazyVStack(alignment:.leading,spacing:16){ForEach(session.browserChannels){channel in
-                        Button{session.tune(channel);session.browser=false;session.controls=false}{VStack(alignment:.leading,spacing:5){Text(channel.name).lineLimit(2);Text(model.now(channel)?.title ?? "No guide available").font(.caption).foregroundStyle(.secondary).lineLimit(1)}.frame(maxWidth:.infinity,alignment:.leading)}
+                        Button{session.tune(channel);session.browser=false;session.controls=false} label:{VStack(alignment:.leading,spacing:5){Text(channel.name).lineLimit(2);Text(model.now(channel)?.title ?? "No guide available").font(.caption).foregroundStyle(.secondary).lineLimit(1)}.frame(maxWidth:.infinity,alignment:.leading)}
                             .focused($focusedChannel,equals:channel.id).id(channel.id)
-                    }}.onAppear{proxy.scrollTo(session.channel.id,anchor:.center)}}
+                    }}}.onAppear{proxy.scrollTo(session.channel.id,anchor:.center)}}
                     .onMoveCommand{if $0 == .left{session.groups=true}}
                     .onChange(of:focusedChannel){_,id in if let row=session.channels.first(where:{$0.id==id}){session.preview=row}}
                 }
@@ -208,3 +208,4 @@ struct PlayerScreen:View {
     }
     private func clock(_ value:Double)->String{let seconds=Int(max(value,0));return String(format:"%d:%02d",seconds/60,seconds%60)}
 }
+
