@@ -175,7 +175,7 @@ struct PlayerScreen:View {
         }.frame(width:width,height:height).background(Color(white:0.06).opacity(0.98))
     }
     private var menu:some View{
-        ScrollView{VStack(alignment:.leading,spacing:22){
+        ScrollView{LazyVStack(alignment:.leading,spacing:22){
             Text(session.menu).font(.title2).bold()
             switch session.menu{
             case "Audio":

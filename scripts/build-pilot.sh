@@ -37,6 +37,9 @@ xcodebuild test -project ContentTV.xcodeproj -scheme ContentTV \
   DEVELOPMENT_TEAM='' 2>&1 | tee build/tests.log
 
 # Capture the clean simulator UI for visual review; no user sources are installed.
+xcrun simctl boot "$simulator" || true
+xcrun simctl bootstatus "$simulator" -b
+xcrun simctl install "$simulator" build/simulator/Build/Products/Debug-appletvsimulator/ContentTV.app
 xcrun simctl launch "$simulator" tv.content.tvos.aworan01
 sleep 8
 xcrun simctl io "$simulator" screenshot dist/Content-TV-tvOS-preview.png
