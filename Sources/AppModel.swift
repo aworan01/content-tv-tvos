@@ -169,8 +169,8 @@ import SwiftUI
         Task{try? await Task.sleep(for:.milliseconds(650));guard playbackRequest==request else{return};player=PlayerSession(channel:channel,channels:list,resume:position,model:self)}
     }
     func refreshDaddy(force:Bool=false)async{
-        guard !daddyBusy else{return}
         guard daddyEnabled else{channels.removeAll{$0.sourceID=="daddylive"};daddyEvents=[];daddyError="";if sourceFilter=="daddylive"{sourceFilter="All sources"};return}
+        guard !daddyBusy else{return}
         daddyBusy=true;defer{daddyBusy=false};daddyError=""
         do{let rows=try await DaddyLive.loadChannels(force:force);if daddyEnabled{channels.removeAll{$0.sourceID=="daddylive"};channels += rows;indexGuides()}}catch{daddyError="Channels: "+error.localizedDescription}
         do{let events=try await DaddyLive.loadEvents(force:force);if daddyEnabled{daddyEvents=events}}catch{daddyError += (daddyError.isEmpty ? "":"\n")+"Schedule: "+error.localizedDescription}

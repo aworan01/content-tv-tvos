@@ -41,7 +41,11 @@ targets:
     type: bundle.unit-test
     platform: tvOS
     sources:
-      - Tests
+      - path: Tests
+        excludes: [Fixtures]
+      - path: Tests/Fixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: ContentTV
     settings:

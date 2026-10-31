@@ -96,7 +96,7 @@ struct SourceForm:View {
                 var updated=source;let value=guideURL.trimmingCharacters(in:.whitespacesAndNewlines)
                 if updated.fairPlay != nil{
                     guard webURL(updated.fairPlay!.certificateURL) != nil,webURL(updated.fairPlay!.licenseURL) != nil else{throw TVFailure.unsupported("Enter the provider’s valid FairPlay certificate and licence URLs.")}
-                    if !licenseHeaders.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty{guard let data=licenseHeaders.data(using:.utf8),let headers=try? JSONDecoder().decode([String:String].self,from:data)else{throw TVFailure.unsupported("Licence headers must be a JSON object of text names and values.")};updated.fairPlay?.headers=headers}
+                    if !licenseHeaders.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty{guard let data=licenseHeaders.data(using:.utf8),let headers=try? JSONDecoder().decode([String:String].self,from:data)else{throw TVFailure.unsupported("Licence headers must be a JSON object of text names and values.")};updated.fairPlay?.headers=headers}else{updated.fairPlay?.headers=[:]}
                 }
                 if !value.isEmpty{guard webURL(value) != nil else{throw TVFailure.invalidURL};updated.guides.append(value)}
                 try await model.saveSource(updated);dismiss()

@@ -77,7 +77,7 @@ final class LocalHTTPServer:@unchecked Sendable {
             var headers:[String:String]=[:];for line in lines.dropFirst(){let p=line.split(separator:":",maxSplits:1).map(String.init);if p.count==2{headers[p[0].lowercased()]=p[1].trimmingCharacters(in:.whitespaces)}}
             let request=LocalRequest(method:String(first[0]),path:String(first[1]),headers:headers)
             self.tasks[id]=Task{[weak self] in
-                do{guard let handler=self?.handler else{throw TVFailure.invalidData};let reply=try await handler(request);try await Self.send(reply,to:connection,head:request.method=="HEAD")}
+                do{guard let handler=self?.handler else{throw TVFailure.invalidData};let reply=try await handler(request);do{try await Self.send(reply,to:connection,head:request.method=="HEAD")}catch{ /* Close a partial response; do not append a second HTTP header. */ }}
                 catch{try? await Self.send(LocalReply(status:502,type:"text/plain",data:Data("Source request failed".utf8)),to:connection,head:false)}
                 connection.cancel()
             }
@@ -118,14 +118,21 @@ actor MediaRelay {
         guard let(url,_)=resources[id]else{return LocalReply(status:404)}
         if url.scheme=="ctvkey",let data=try drm?.localKey(for:url.host ?? ""){return LocalReply(data:data)}
         let target=try await daddy?.authorized(url) ?? url
-        var h=headers;if let range=request.headers["range"]{h["Range"]=range}
-        let payload=try await HTTP.request(target,headers:h)
+        var h=headers;if daddy==nil,let range=request.headers["range"]{h["Range"]=range}
+        let payload:HTTPPayload
+        do{payload=try await HTTP.request(target,headers:h)}catch let error as TVFailure{
+            if case .http(let status)=error,[401,403].contains(status),let daddy=daddy{await daddy.invalidate();payload=try await HTTP.request(daddy.authorized(url),headers:h)}else{throw error}
+        }
         var bytes=payload.data;if daddy != nil{bytes=try DaddyTransport.unwrap(bytes)}
         if let text=String(data:bytes,encoding:.utf8),text.trimmingCharacters(in:.whitespacesAndNewlines).hasPrefix("#EXTM3U"){
             let parent=payload.response.url ?? url
             if let configured=drm{drm=try await configured.resolvingKeys(manifest:text)}
             let rewritten=try HLSRewrite.rewrite(text,base:parent,drm:drm){self.local($0).absoluteString}
             return LocalReply(type:"application/vnd.apple.mpegurl",data:Data(rewritten.utf8))
+        }
+        if daddy != nil,let requested=request.headers["range"]{
+            guard let range=try? ByteRange.parse(requested,size:Int64(bytes.count))else{return LocalReply(status:416,headers:["Content-Range":"bytes */\(bytes.count)"])}
+            return LocalReply(status:206,type:"video/mp2t",headers:["Accept-Ranges":"bytes","Content-Range":"bytes \(range.start)-\(range.end)/\(bytes.count)"],data:bytes.subdata(in:Int(range.start)..<Int(range.end+1)))
         }
         var output:[String:String]=[:];for key in ["Content-Range","Accept-Ranges"]{if let value=payload.response.value(forHTTPHeaderField:key){output[key]=value}}
         return LocalReply(status:payload.response.statusCode,type:daddy == nil ? (payload.response.mimeType ?? "application/octet-stream"):"video/mp2t",headers:output,data:bytes)

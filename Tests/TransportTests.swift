@@ -1,4 +1,6 @@
 import XCTest
+import AVFoundation
+import CoreVideo
 @testable import ContentTV
 
 final class TransportTests:XCTestCase {
@@ -89,5 +91,38 @@ final class TransportTests:XCTestCase {
         defer{try? FileManager.default.removeItem(at:folder)}
         let result=await Task.detached{ctv_torrent_loopback_test(folder.path)}.value
         XCTAssertEqual(result,0,"Native local peer transfer and selected-file read must succeed")
+    }
+    func testDaddyRangesApplyAfterUnwrapping()async throws{
+        var ts=Data(repeating:0,count:376);ts[0]=0x47;ts[188]=0x47
+        let expected=ts.subdata(in:188..<376)
+        var carrier=Data([137,80,78,71,13,10,26,10,0,0,0,0,73,69,78,68,0,0,0,0]);carrier.append(ts)
+        let upstream=LocalHTTPServer();let base=try await upstream.start();defer{upstream.stop()}
+        upstream.handler={request in XCTAssertNil(request.headers["range"]);return LocalReply(type:"image/png",data:carrier)}
+        let source=base.appendingPathComponent("segment.png")
+        let relay=MediaRelay(headers:[:],daddy:DaddySession(stream:source,headers:[:]))
+        let url=try await relay.start(source)
+        do{let payload=try await HTTP.request(url,headers:["Range":"bytes=188-375"]);XCTAssertEqual(payload.response.statusCode,206);XCTAssertEqual(payload.data,expected);XCTAssertEqual(payload.response.value(forHTTPHeaderField:"Content-Range"),"bytes 188-375/376")}catch{await relay.stop();throw error};await relay.stop()
+    }
+    @MainActor func testConfiguredKeyDecryptsAndDecodesSyntheticHLS()async throws{
+        let bundle=Bundle(for:TransportTests.self)
+        guard let manifest=bundle.url(forResource:"master",withExtension:"m3u8",subdirectory:"Fixtures/ClearHLS")else{XCTFail("Missing synthetic HLS fixture");return}
+        let directory=manifest.deletingLastPathComponent(),server=LocalHTTPServer()
+        let base=try await server.start();defer{server.stop()}
+        server.handler={request in
+            let name=String(request.path.dropFirst());guard ["master.m3u8","segment0.ts","segment1.ts","segment2.ts"].contains(name)else{return LocalReply(status:404)}
+            return LocalReply(type:name.hasSuffix("m3u8") ? "application/vnd.apple.mpegurl":"video/mp2t",data:try Data(contentsOf:directory.appendingPathComponent(name)))
+        }
+        let relay=MediaRelay(headers:[:],drm:DRMConfig(scheme:"clearkey",keys:[kid:key]))
+        let url=try await relay.start(base.appendingPathComponent("master.m3u8"))
+        let item=AVPlayerItem(url:url),player=AVPlayer()
+        let output=AVPlayerItemVideoOutput(pixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA]);item.add(output)
+        player.replaceCurrentItem(with:item);player.isMuted=true;player.play()
+        var decoded=false;let deadline=Date().addingTimeInterval(25)
+        while Date()<deadline && item.status != .failed{
+            if output.copyPixelBuffer(forItemTime:player.currentTime(),itemTimeForDisplay:nil) != nil{decoded=true;break}
+            try await Task.sleep(for:.milliseconds(100))
+        }
+        player.pause();player.replaceCurrentItem(with:nil);await relay.stop()
+        XCTAssertTrue(decoded,"AVPlayer must decrypt and decode the synthetic AES-128 HLS video through the configured ClearKey relay. Status: \(item.status.rawValue)")
     }
 }

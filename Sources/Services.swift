@@ -107,7 +107,7 @@ enum Xtream {
         let rows=try jsonArray(data);var seen=Set<String>()
         return rows.compactMap{j in let identifier=jsonString(j[kind=="series" ? "series_id":"stream_id"]);guard !identifier.isEmpty else{return nil};let id=source.id+":"+kind+":"+identifier;guard seen.insert(id).inserted else{return nil}
             let address=kind=="series" ? "" : stream(source,kind:kind=="live" ? "live":"movie",id:identifier,extension:kind=="live" ? "m3u8":jsonString(j["container_extension"]))
-            return TVChannel(id:id,sourceID:source.id,sourceName:source.name,name:jsonString(j["name"]),url:address,group:groups[jsonString(j["category_id"])] ?? "Other",guideID:jsonString(j["epg_channel_id"]),logo:jsonString(j[kind=="series" ? "cover":"stream_icon"]),kind:kind,seriesID:kind=="series" ? identifier:"",summary:jsonString(j["plot"]))
+            return TVChannel(id:id,sourceID:source.id,sourceName:source.name,name:jsonString(j["name"]),url:address,group:groups[jsonString(j["category_id"])] ?? "Other",guideID:jsonString(j["epg_channel_id"]),logo:jsonString(j[kind=="series" ? "cover":"stream_icon"]),kind:kind,seriesID:kind=="series" ? identifier:"",summary:jsonString(j["plot"]),drm:source.fairPlay)
         }
     }
     static func fetch(_ source:TVSource,kind:String,force:Bool=false)async throws->[TVChannel]{
@@ -121,7 +121,8 @@ enum Xtream {
         let data=try await HTTP.cached(endpoint(source,action:"get_series_info",extra:[URLQueryItem(name:"series_id",value:series.seriesID)]),age:3600)
         guard let root=try JSONSerialization.jsonObject(with:data) as? [String:Any],let seasons=root["episodes"] as? [String:Any] else{throw TVFailure.invalidData}
         var result:[TVChannel]=[]
-        for season in seasons.keys.sorted(by:{($0 as NSString).integerValue<($1 as NSString).integerValue}){for j in seasons[season] as? [[String:Any]] ?? []{let identifier=jsonString(j["id"]);guard !identifier.isEmpty else{continue};let info=j["info"] as? [String:Any] ?? [:];result.append(TVChannel(id:source.id+":episode:"+identifier,sourceID:source.id,sourceName:source.name,name:"S\(season) · "+jsonString(j["title"]),url:stream(source,kind:"series",id:identifier,extension:jsonString(j["container_extension"])),group:"Season "+season,logo:jsonString(info["movie_image"]),kind:"episode",summary:jsonString(info["plot"])))} }
+        for season in seasons.keys.sorted(by:{($0 as NSString).integerValue<($1 as NSString).integerValue}){for j in seasons[season] as? [[String:Any]] ?? []{let identifier=jsonString(j["id"]);guard !identifier.isEmpty else{continue};let info=j["info"] as? [String:Any] ?? [:];result.append(TVChannel(id:source.id+":episode:"+identifier,sourceID:source.id,sourceName:source.name,name:"S\(season) · "+jsonString(j["title"]),url:stream(source,kind:"series",id:identifier,extension:jsonString(j["container_extension"])),group:"Season "+season,logo:jsonString(info["movie_image"]),kind:"episode",summary:jsonString(info["plot"]),drm:source.fairPlay))} }
         return result
     }
 }
+
