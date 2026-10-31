@@ -30,9 +30,8 @@ targets:
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: Connect to media sources on your home network.
         NSAppTransportSecurity:
+          # Fine-grained media/local keys would override this and block HTTP API imports.
           NSAllowsArbitraryLoads: true
-          NSAllowsArbitraryLoadsForMedia: true
-          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tv.content.tvos.aworan01
