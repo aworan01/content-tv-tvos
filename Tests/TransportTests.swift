@@ -59,6 +59,13 @@ final class TransportTests:XCTestCase {
         XCTAssertEqual(try DaddyTransport.unwrap(png),ts)
         XCTAssertEqual(try DaddyTransport.unwrap(Data("TIKTIKRAW".utf8)+ts),ts)
     }
+    func testDaddyPixelPNGAndWebPExifCarriers()throws{
+        var ts=Data(repeating:0,count:376);ts[0]=0x47;ts[188]=0x47
+        let png=Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAAL0lEQVR4nGMI8fQGooAIBgYGGfluDgYQYOIqTmeQ2HWglmO3LMOGqmDfCkYGCgAA2M4JX8ryIJUAAAAASUVORK5CYII=")!
+        XCTAssertEqual(try DaddyTransport.unwrap(png),ts)
+        var webp=Data("RIFF".utf8);webp.append(contentsOf:[0x84,1,0,0]);webp.append(Data("WEBPEXIF".utf8));webp.append(contentsOf:[0x78,1,0,0]);webp.append(ts)
+        XCTAssertEqual(try DaddyTransport.unwrap(webp),ts)
+    }
     func testOldHistoryAndSourcesDecodeWithoutNewFields()throws{
         let source=TVSource(name:"Previous source",address:"https://example.invalid/list")
         let channel=TVChannel(id:"old",sourceID:source.id,sourceName:source.name,name:"Previous channel",url:"https://example.invalid/live.m3u8")
