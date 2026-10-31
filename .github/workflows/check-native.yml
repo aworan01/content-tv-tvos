@@ -2,7 +2,7 @@ name: Check native torrent engine
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   native:
     if: github.event.repository.private == false
@@ -18,3 +18,11 @@ jobs:
           brew list ninja >/dev/null 2>&1 || brew install ninja
       - name: Compile device and simulator libraries
         run: bash scripts/build-native.sh
+      - name: Publish reusable native build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          tar -czf dist/ContentTorrent-tvos-v1.tar.gz -C build/native appletvos/libContentTorrent.a appletvsimulator/libContentTorrent.a
+          (cd dist; shasum -a 256 ContentTorrent-tvos-v1.tar.gz) > dist/Native-SHA256.txt
+          gh release create "native-v1-${GITHUB_RUN_NUMBER}" dist/ContentTorrent-tvos-v1.tar.gz dist/Native-SHA256.txt Sources/Resources/*LICENSE* --prerelease --target "$GITHUB_SHA" --title "Native torrent dependency v1 build ${GITHUB_RUN_NUMBER}" --notes "Pinned libtorrent 2.0.11 and Boost 1.85.0, arm64 tvOS device/simulator. This is a build dependency, not an installable app. App integration tests run in the main workflow."
